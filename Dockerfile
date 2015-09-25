@@ -1,0 +1,25 @@
+FROM alpine
+
+ADD  backup-mongodb.go /
+RUN apk add --update bash \
+  && apk --update add go git\
+  && ORG_PATH="github.com/Financial-Times" \
+  && REPO_PATH="${ORG_PATH}/coco-mongodb-backup" \
+  && export GOPATH=/gopath \
+  && mkdir -p $GOPATH/src/${ORG_PATH} \
+  && ln -s ${PWD} $GOPATH/src/${REPO_PATH} \
+  && cd $GOPATH/src/${REPO_PATH} \
+  && go get \
+  && go test \
+  && go build ${REPO_PATH} \
+  && apk del go git \
+  && rm -rf $GOPATH /var/cache/apk/*
+
+CMD ./coco-mongodb-backup \
+    -mongoDbPort=$MONGODB_PORT \
+    -mongoDbHost=$MONGODB_HOST \
+    -awsAccessKey=$AWS_ACCESS_KEY \
+    -awsSecretKey=$AWS_SECRET_KEY \
+    -bucketName=$BUCKET_NAME \
+    -dataFolder=$DATA_FOLDER \
+    -s3Domain=$S3_DOMAIN
