@@ -115,9 +115,14 @@ func main() {
 
 	//recursively walk the filetree of the data folder,
 	//adding all files and folder structure to the archive
-	fmt.Println("Starting walk, hopefully async")
-	go filepath.Walk(dataFolder, addtoArchive)
-	fmt.Println("Just after starting walk")
+	go func() {
+		//we have to close this here so that the read function completes
+		defer pipeWriter.Close()
+		fmt.Println("Starting walk, hopefully async")
+		filepath.Walk(dataFolder, addtoArchive)
+		fmt.Println("Just after starting walk")
+	} ()
+	
 
 	//create a writer for the bucket
 	bucketWriter, _ := bucket.PutWriter(destinationfileName, nil, nil)
