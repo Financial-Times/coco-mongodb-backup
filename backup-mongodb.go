@@ -108,22 +108,22 @@ func main() {
 
 	//compress the tar archive
 	fileWriter := gzip.NewWriter(pipeWriter)
-	defer fileWriter.Close()
+	
 	//create a tar archive
 	tarfileWriter = tar.NewWriter(fileWriter)
-	defer tarfileWriter.Close()
 
 	//recursively walk the filetree of the data folder,
 	//adding all files and folder structure to the archive
 	go func() {
 		//we have to close this here so that the read function completes
 		defer pipeWriter.Close()
+		defer fileWriter.Close()
+		defer tarfileWriter.Close()
 		fmt.Println("Starting walk, hopefully async")
 		filepath.Walk(dataFolder, addtoArchive)
 		fmt.Println("Just after starting walk")
 	} ()
 	
-
 	//create a writer for the bucket
 	bucketWriter, _ := bucket.PutWriter(destinationfileName, nil, nil)
 	defer bucketWriter.Close()
@@ -131,6 +131,7 @@ func main() {
 	fmt.Println("Before io.copy")
 	//upload the archive to the bucket
 	io.Copy(bucketWriter, pipeReader)
+	defer pipeReader.Close()
 	fmt.Println("After io.copy")
 	fmt.Println("Duration: " + time.Since(startTime).String())
 }
