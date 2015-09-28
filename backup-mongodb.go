@@ -97,10 +97,6 @@ func main() {
 
 	s3 := s3gof3r.New("", awsKeys)
 	bucket := s3.Bucket(bucketName)
-
-	//TODO generate filename based on date
-	destinationfileName := "2015-Sep-28.tar.gz"
-
 	pipeReader, pipeWriter := io.Pipe()
 
 	//compress the tar archive
@@ -118,9 +114,11 @@ func main() {
 		defer tarfileWriter.Close()
 		filepath.Walk(dataFolder, addtoArchive)
 	} ()
+
+	archiveName := time.Now().Format("2006-01-02T15:04:05")
 	
 	//create a writer for the bucket
-	bucketWriter, _ := bucket.PutWriter(destinationfileName, nil, nil)
+	bucketWriter, _ := bucket.PutWriter(archiveName, nil, nil)
 	defer bucketWriter.Close()
 
 	//upload the archive to the bucket
