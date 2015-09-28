@@ -39,7 +39,9 @@ func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecr
 }
 
 func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
+	fmt.Println("In AddToArchive start")
 	if fileInfo.IsDir() {
+		fmt.Println("Is directory")
 		return nil
 	}
 
@@ -54,7 +56,7 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 
 	//add file to the archive
 	io.Copy(tarfileWriter, file)
-
+	fmt.Println("In AddToArchive end")
 	return nil
 }
 
@@ -81,12 +83,12 @@ func main() {
 
 	if isMaster {
 		fmt.Println("The node I am running on is master, backup will not take place")
-		os.Exit(2)
+		//os.Exit(2)
 	}
 
-	db.Run(bson.M{"db.fsyncLock": 1}, result)
+	//db.Run(bson.M{"db.fsyncLock": 1}, result)
 	//TODO log if this fails
-	defer db.Run(bson.M{"db.fsyncUnlock": 1}, result)
+	//defer db.Run(bson.M{"db.fsyncUnlock": 1}, result)
 
 	//the default domain is s3.amazonaws.com, we need the eu-west domain
 	s3gof3r.DefaultDomain = s3Domain
@@ -100,33 +102,30 @@ func main() {
 	bucket := s3.Bucket(bucketName)
 
 	//TODO generate filename based on date
-	destinationfile := "2015-Sep-25.tar.gz"
+	destinationfileName := "2015-Sep-28.tar.gz"
 
-	tarfile, _ := os.Create(destinationfile)
+	pipeReader, pipeWriter := io.Pipe()
+
 	//compress the tar archive
-	fileWriter := gzip.NewWriter(tarfile)
+	fileWriter := gzip.NewWriter(pipeWriter)
+	defer fileWriter.Close()
 	//create a tar archive
 	tarfileWriter = tar.NewWriter(fileWriter)
+	defer tarfileWriter.Close()
 
 	//recursively walk the filetree of the data folder,
 	//adding all files and folder structure to the archive
-	filepath.Walk(dataFolder, addtoArchive)
-
-	//close all streams before reading the file
-	tarfileWriter.Close()
-	fileWriter.Close()
-	tarfile.Close()
-
-	//re-open the archive we just created
-	fileToUpload, _ := os.Open(destinationfile)
-	defer fileToUpload.Close()
+	fmt.Println("Starting walk, hopefully async")
+	go filepath.Walk(dataFolder, addtoArchive)
+	fmt.Println("Just after starting walk")
 
 	//create a writer for the bucket
-	bucketWriter, _ := bucket.PutWriter(fileToUpload.Name(), nil, nil)
+	bucketWriter, _ := bucket.PutWriter(destinationfileName, nil, nil)
 	defer bucketWriter.Close()
 
+	fmt.Println("Before io.copy")
 	//upload the archive to the bucket
-	io.Copy(bucketWriter, fileToUpload)
-
+	io.Copy(bucketWriter, pipeReader)
+	fmt.Println("After io.copy")
 	fmt.Println("Duration: " + time.Since(startTime).String())
 }
