@@ -39,9 +39,7 @@ func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecr
 }
 
 func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
-	fmt.Println("In AddToArchive start")
 	if fileInfo.IsDir() {
-		fmt.Println("Is directory")
 		return nil
 	}
 
@@ -56,7 +54,7 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 
 	//add file to the archive
 	io.Copy(tarfileWriter, file)
-	fmt.Println("In AddToArchive end")
+	fmt.Println("Added file " + path + " to archive.")
 	return nil
 }
 
@@ -64,7 +62,6 @@ var tarfileWriter *tar.Writer
 var defaultDb = "native-store"
 
 //TODO error handling
-//TODO stream archive directly to gof3r, don't write to file
 func main() {
 	startTime := time.Now()
 	fmt.Println("Starting backup operation: " + startTime.String())
@@ -119,19 +116,16 @@ func main() {
 		defer pipeWriter.Close()
 		defer fileWriter.Close()
 		defer tarfileWriter.Close()
-		fmt.Println("Starting walk, hopefully async")
 		filepath.Walk(dataFolder, addtoArchive)
-		fmt.Println("Just after starting walk")
 	} ()
 	
 	//create a writer for the bucket
 	bucketWriter, _ := bucket.PutWriter(destinationfileName, nil, nil)
 	defer bucketWriter.Close()
 
-	fmt.Println("Before io.copy")
 	//upload the archive to the bucket
 	io.Copy(bucketWriter, pipeReader)
 	defer pipeReader.Close()
-	fmt.Println("After io.copy")
+	
 	fmt.Println("Duration: " + time.Since(startTime).String())
 }
