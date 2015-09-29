@@ -32,8 +32,6 @@ func readArgs() (string, int, string, string, string, string, string) {
 func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
 	fmt.Println("mongoDbHost  : ", mongoDbHost)
 	fmt.Println("mongoDbPort  : ", mongoDbPort)
-	fmt.Println("awsAccessKey : ", awsAccessKey)
-	fmt.Println("awsSecretKey : ", awsSecretKey)
 	fmt.Println("bucketName   : ", bucketName)
 	fmt.Println("dataFolder   : ", dataFolder)
 	fmt.Println("s3Domain     : ", s3Domain)
@@ -44,7 +42,7 @@ func abortOnInvalidParams(paramNames []string) {
 		fmt.Println(paramName + " is missing or invalid!")
 	}
 	fmt.Println("Aborting backup operation!")
-	os.Exit(2)
+	os.Exit(1)
 }
 
 func validateArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
@@ -82,42 +80,70 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 		return nil
 	}
 
-	file, _ := os.Open(path)
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Println("Cannot open file to add to archive: " + path + ", error: " + err.Error())
+		return err
+	}
 	defer file.Close()
 
 	//create and write tar-specific file header
-	fileInfoHeader, _ := tar.FileInfoHeader(fileInfo, "")
+	fileInfoHeader, err := tar.FileInfoHeader(fileInfo, "")
+	if err != nil {
+		fmt.Println("Cannot create tar header, error: " + err.Error())
+		return err
+	}
 	//replace file name with full path to preserve file structure in the archive
 	fileInfoHeader.Name = path
-	tarfileWriter.WriteHeader(fileInfoHeader)
+	err = tarWriter.WriteHeader(fileInfoHeader)
+	if err != nil {
+		fmt.Println("Cannot write tar header, error: " + err.Error())
+		return err
+	}
 
 	//add file to the archive
-	io.Copy(tarfileWriter, file)
+	_, err = io.Copy(tarWriter, file)
+	if err != nil {
+		fmt.Println("Cannot add file to archive, error: " + err.Error())
+		return err
+	}
+
 	fmt.Println("Added file " + path + " to archive.")
 	return nil
 }
 
-func lockDb(session *mgo.Session) {
+func lockDb(session *mgo.Session) error {
 	fmt.Println("Attempting to lock DB...")
-	session.FsyncLock()
-	//TODO check result
+	err := session.FsyncLock()
+	if err != nil {
+		return err
+	}
 	fmt.Println("DB lock command successfully executed.")
+	return nil
 }
 
 func unlockDb(session *mgo.Session) {
 	fmt.Println("Attempting to unlock DB...")
-	session.FsyncUnlock()
-	//TODO check result
+	err := session.FsyncUnlock()
+	if err != nil {
+		fmt.Println("Cannot unlock DB, operation fails with error: " + err.Error())
+		return
+	}
 	fmt.Println("DB unlock command successfully executed.")
 }
 
-var tarfileWriter *tar.Writer
+func printAbortMessage(operationDescription string, errorMessage string) {
+	fmt.Println(operationDescription + ", error: " + errorMessage)
+	fmt.Println("Aborting backup operation!")
+}
+
+var tarWriter *tar.Writer
 var defaultDb = "native-store"
+var archiveNameDateFormat = "2006-01-02T15:04:05"
 
 //this enables mgo to connect to secondary nodes
 var mongoDirectConnectionConfig = "/?connect=direct"
 
-//TODO error handling
 func main() {
 	startTime := time.Now()
 	fmt.Println("Starting backup operation: " + startTime.String())
@@ -126,24 +152,37 @@ func main() {
 	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 	validateArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 
-	session, _ := mgo.Dial(mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig)
+	mongoConnectionString := mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig
+	session, err := mgo.Dial(mongoConnectionString)
+	if err != nil {
+		printAbortMessage("Can't connect to mongo on "+mongoConnectionString, err.Error())
+		return
+	}
 	session.SetMode(mgo.Monotonic, true)
 	defer session.Close()
+
 	db := session.DB(defaultDb)
 
 	result := make(map[string]interface{})
-
-	db.Run(bson.M{"isMaster": 1}, result)
-	isMaster := result["ismaster"].(bool)
-
-	if isMaster {
-		fmt.Println("The node I am running on is PRIMARY, backup will NOT be performed.")
+	err = db.Run(bson.M{"isMaster": 1}, result)
+	if err != nil {
+		printAbortMessage("Can't check if node is master, db.isMaster() fails", err.Error())
 		return
 	}
 
+	isMaster := result["ismaster"].(bool)
+	if isMaster {
+		printAbortMessage("Backup will NOT be performed", "the node I am running on is PRIMARY")
+		return
+	}
 	fmt.Println("The node I am running on is SECONDARY, backup will be performed.")
 
-	lockDb(session)
+	err = lockDb(session)
+	if err != nil {
+		printAbortMessage("Cannot lock DB", err.Error())
+		return
+	}
+
 	defer unlockDb(session)
 
 	//the default domain is s3.amazonaws.com, we need the eu-west domain
@@ -159,31 +198,41 @@ func main() {
 	pipeReader, pipeWriter := io.Pipe()
 
 	//compress the tar archive
-	fileWriter := gzip.NewWriter(pipeWriter)
-
+	gzipWriter := gzip.NewWriter(pipeWriter)
 	//create a tar archive
-	tarfileWriter = tar.NewWriter(fileWriter)
+	tarWriter = tar.NewWriter(gzipWriter)
 
 	//recursively walk the filetree of the data folder,
 	//adding all files and folder structure to the archive
 	go func() {
 		//we have to close these here so that the read function doesn't block
 		defer pipeWriter.Close()
-		defer fileWriter.Close()
-		defer tarfileWriter.Close()
+		defer gzipWriter.Close()
+		defer tarWriter.Close()
 
-		filepath.Walk(dataFolder, addtoArchive)
+		err = filepath.Walk(dataFolder, addtoArchive)
+		if err != nil {
+
+		}
 	}()
 
-	archiveName := time.Now().Format("2006-01-02T15:04:05")
+	archiveName := time.Now().Format(archiveNameDateFormat)
 
 	//create a writer for the bucket
-	bucketWriter, _ := bucket.PutWriter(archiveName, nil, nil)
+	bucketWriter, err := bucket.PutWriter(archiveName, nil, nil)
+	if err != nil {
+		printAbortMessage("PutWriter cannot be created", err.Error())
+		return
+	}
 	defer bucketWriter.Close()
 
 	//upload the archive to the bucket
-	io.Copy(bucketWriter, pipeReader)
-	defer pipeReader.Close()
+	_, err = io.Copy(bucketWriter, pipeReader)
+	if err != nil {
+		printAbortMessage("Cannot upload archive to S3", err.Error())
+		return
+	}
+	pipeReader.Close()
 
 	fmt.Println("Duration: " + time.Since(startTime).String())
 }
