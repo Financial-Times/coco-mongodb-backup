@@ -18,7 +18,7 @@ import (
 
 func readArgs() (string, int, string, string, string, string, string) {
 	mongoDbHost := flag.String("mongoDbHost", "", "Mongo DB Host")
-	mongoDbPort := flag.Int("mongoDbPort", 27017, "Mongo DB Port")
+	mongoDbPort := flag.Int("mongoDbPort", -1, "Mongo DB Port")
 	awsAccessKey := flag.String("awsAccessKey", "", "AWS access key")
 	awsSecretKey := flag.String("awsSecretKey", "", "AWS secret key")
 	bucketName := flag.String("bucketName", "", "Bucket name")
@@ -30,13 +30,51 @@ func readArgs() (string, int, string, string, string, string, string) {
 }
 
 func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
-	fmt.Println("mongoDbHost:", mongoDbHost)
-	fmt.Println("mongoDbPort", mongoDbPort)
-	fmt.Println("awsAccessKey", awsAccessKey)
-	fmt.Println("awsSecretKey", awsSecretKey)
-	fmt.Println("bucketName", bucketName)
-	fmt.Println("dataFolder", dataFolder)
-	fmt.Println("s3Domain", s3Domain)
+	fmt.Println("mongoDbHost  : ", mongoDbHost)
+	fmt.Println("mongoDbPort  : ", mongoDbPort)
+	fmt.Println("awsAccessKey : ", awsAccessKey)
+	fmt.Println("awsSecretKey : ", awsSecretKey)
+	fmt.Println("bucketName   : ", bucketName)
+	fmt.Println("dataFolder   : ", dataFolder)
+	fmt.Println("s3Domain     : ", s3Domain)
+}
+
+func abortOnInvalidParams(paramNames []string) {
+	for _, paramName := range paramNames {
+		fmt.Println(paramName + " is missing or invalid!")
+	}
+	fmt.Println("Aborting backup operation!")
+	os.Exit(2)
+}
+
+func validateArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
+	var invalidArgs []string
+
+	if len(mongoDbHost) < 1 {
+		invalidArgs = append(invalidArgs, "mongoDbHost")
+	}
+	if mongoDbPort < 0 {
+		invalidArgs = append(invalidArgs, "mongoDbPort")
+	}
+	if len(awsAccessKey) < 1 {
+		invalidArgs = append(invalidArgs, "awsAccessKey")
+	}
+	if len(awsSecretKey) < 1 {
+		invalidArgs = append(invalidArgs, "awsSecretKey")
+	}
+	if len(bucketName) < 1 {
+		invalidArgs = append(invalidArgs, "bucketName")
+	}
+	if len(dataFolder) < 1 {
+		invalidArgs = append(invalidArgs, "dataFolder")
+	}
+	if len(s3Domain) < 1 {
+		invalidArgs = append(invalidArgs, "s3Domain")
+	}
+
+	if len(invalidArgs) > 0 {
+		abortOnInvalidParams(invalidArgs)
+	}
 }
 
 func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
@@ -86,6 +124,7 @@ func main() {
 
 	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain := readArgs()
 	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
+	validateArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 
 	session, _ := mgo.Dial(mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig)
 	session.SetMode(mgo.Monotonic, true)
