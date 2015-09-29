@@ -5,14 +5,15 @@ import (
 	"compress/gzip"
 	"flag"
 	"fmt"
-	"github.com/rlmcpherson/s3gof3r"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/rlmcpherson/s3gof3r"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 func readArgs() (string, int, string, string, string, string, string) {
@@ -58,8 +59,25 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 	return nil
 }
 
+func lockDb(session *mgo.Session) {
+	fmt.Println("Attempting to lock DB...")
+	session.FsyncLock()
+	//TODO check result
+	fmt.Println("DB lock command successfully executed.")
+}
+
+func unlockDb(session *mgo.Session) {
+	fmt.Println("Attempting to unlock DB...")
+	session.FsyncUnlock()
+	//TODO check result
+	fmt.Println("DB unlock command successfully executed.")
+}
+
 var tarfileWriter *tar.Writer
 var defaultDb = "native-store"
+
+//this enables mgo to connect to secondary nodes
+var mongoDirectConnectionConfig = "/?connect=direct"
 
 //TODO error handling
 func main() {
@@ -69,7 +87,8 @@ func main() {
 	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain := readArgs()
 	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 
-	session, _ := mgo.Dial(mongoDbHost + ":" + strconv.Itoa(mongoDbPort))
+	session, _ := mgo.Dial(mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig)
+	session.SetMode(mgo.Monotonic, true)
 	defer session.Close()
 	db := session.DB(defaultDb)
 
@@ -79,13 +98,14 @@ func main() {
 	isMaster := result["ismaster"].(bool)
 
 	if isMaster {
-		fmt.Println("The node I am running on is master, backup will not take place")
-		//os.Exit(2)
+		fmt.Println("The node I am running on is PRIMARY, backup will NOT be performed.")
+		return
 	}
 
-	//db.Run(bson.M{"db.fsyncLock": 1}, result)
-	//TODO log if this fails
-	//defer db.Run(bson.M{"db.fsyncUnlock": 1}, result)
+	fmt.Println("The node I am running on is SECONDARY, backup will be performed.")
+
+	lockDb(session)
+	defer unlockDb(session)
 
 	//the default domain is s3.amazonaws.com, we need the eu-west domain
 	s3gof3r.DefaultDomain = s3Domain
@@ -101,22 +121,23 @@ func main() {
 
 	//compress the tar archive
 	fileWriter := gzip.NewWriter(pipeWriter)
-	
+
 	//create a tar archive
 	tarfileWriter = tar.NewWriter(fileWriter)
 
 	//recursively walk the filetree of the data folder,
 	//adding all files and folder structure to the archive
 	go func() {
-		//we have to close this here so that the read function completes
+		//we have to close these here so that the read function doesn't block
 		defer pipeWriter.Close()
 		defer fileWriter.Close()
 		defer tarfileWriter.Close()
+
 		filepath.Walk(dataFolder, addtoArchive)
-	} ()
+	}()
 
 	archiveName := time.Now().Format("2006-01-02T15:04:05")
-	
+
 	//create a writer for the bucket
 	bucketWriter, _ := bucket.PutWriter(archiveName, nil, nil)
 	defer bucketWriter.Close()
@@ -124,6 +145,6 @@ func main() {
 	//upload the archive to the bucket
 	io.Copy(bucketWriter, pipeReader)
 	defer pipeReader.Close()
-	
+
 	fmt.Println("Duration: " + time.Since(startTime).String())
 }
