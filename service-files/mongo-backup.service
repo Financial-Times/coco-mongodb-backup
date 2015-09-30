@@ -1,25 +1,49 @@
 [Unit]
 Description=Job to backup mongo DB data files to S3
+# mongo DB should already be running
 Requires=mongodb@%i.service
 
 [Service]
+
+# process will be short-lived and that systemd should wait for the process to 
+# exit before continuing on with other units.
 Type=oneshot
+
+# should start up instantly, so start timeout can be 0
 TimeoutStartSec=0
+
+# let Docker remove work correctly.
 KillMode=none
+
+# stop already running instance
 ExecStartPre=-/usr/bin/docker kill %p
+
+# remove existing instance
 ExecStartPre=-/usr/bin/docker rm %p
+
 ExecStart=/bin/sh -c "\
+	# parse mongo port 
 	MONGODB_PORT=${docker ps | grep mongodb | awk '{ print $1 }' | xargs -i docker port '{}' 27017 | cut -d":" -f2}; \
+	
+	# mongo hostname is the machine we are on now
     MONGODB_HOST=$HOSTNAME; \
+	
+	# read aws keys from etcd - already there
     AWS_ACCESS_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_access_key_id);\
     AWS_SECRET_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_secret_access_key); \
+	
+	# read bucket, data folder and s3 domain - TODO add them in pre-prod and prod
     BUCKET_NAME=$(/usr/bin/etcdctl get /ft/config/mongo-backup/bucket); \
     DATA_FOLDER=$(/usr/bin/etcdctl get /ft/config/mongo-backup/data_folder); \
     S3_DOMAIN=$(/usr/bin/etcdctl get /ft/config/mongo-backup/s3_domain); \
+	
+	# TODO run correct image
 	docker run --name %p --rm -v /var/run/docker.sock:/var/run/docker.sock coco/docker-gc || docker rmi coco/docker-gc"
 
 [Install]
+# this sets user-level
 WantedBy=multi-user.target
 
 [X-Fleet]
+# we only want this to run on mongo machines
 MachineOf=mongodb@%i.service
