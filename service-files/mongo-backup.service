@@ -1,0 +1,25 @@
+[Unit]
+Description=Job to backup mongo DB data files to S3
+Requires=mongodb@%i.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=0
+KillMode=none
+ExecStartPre=-/usr/bin/docker kill %p
+ExecStartPre=-/usr/bin/docker rm %p
+ExecStart=/bin/sh -c "\
+	MONGODB_PORT=${docker ps | grep mongodb | awk '{ print $1 }' | xargs -i docker port '{}' 27017 | cut -d":" -f2}; \
+    MONGODB_HOST=$HOSTNAME; \
+    AWS_ACCESS_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_access_key_id);\
+    AWS_SECRET_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_secret_access_key); \
+    BUCKET_NAME=$(/usr/bin/etcdctl get /ft/config/mongo-backup/bucket); \
+    DATA_FOLDER=$(/usr/bin/etcdctl get /ft/config/mongo-backup/data_folder); \
+    S3_DOMAIN=$(/usr/bin/etcdctl get /ft/config/mongo-backup/s3_domain); \
+	docker run --name %p --rm -v /var/run/docker.sock:/var/run/docker.sock coco/docker-gc || docker rmi coco/docker-gc"
+
+[Install]
+WantedBy=multi-user.target
+
+[X-Fleet]
+MachineOf=mongodb@%i.service
