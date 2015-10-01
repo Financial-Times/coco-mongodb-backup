@@ -20,19 +20,16 @@ ExecStartPre=-/usr/bin/docker kill %p
 # remove existing instance
 ExecStartPre=-/usr/bin/docker rm %p
 
-ExecStart=/bin/sh -c "\
+ExecStart=/bin/sh -c '\
     # parse mongo port 
     MONGODB_PORT=${docker ps | grep mongodb | awk '{ print $1 }' | xargs -i docker port '{}' 27017 | cut -d":" -f2}; \
-
     # mongo hostname is the machine we are on now
     MONGODB_HOST=$HOSTNAME; \
-    
     AWS_ACCESS_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_access_key_id);\
     AWS_SECRET_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_secret_access_key); \
     BUCKET_NAME=$(/usr/bin/etcdctl get /ft/config/mongo-backup/bucket); \
     DATA_FOLDER=$(/usr/bin/etcdctl get /ft/config/mongo-backup/data_folder); \
     S3_DOMAIN=$(/usr/bin/etcdctl get /ft/config/mongo-backup/s3_domain); \
-
      /usr/bin/docker run --rm --name %p \
         -e MONGODB_PORT=$MONGODB_PORT \
         -e MONGODB_HOST=$MONGODB_HOST \
@@ -42,8 +39,8 @@ ExecStart=/bin/sh -c "\
         -e DATA_FOLDER=$DATA_FOLDER \
         -e S3_DOMAIN=$S3_DOMAIN \
         -v /vol/mongodb:$DATA_FOLDER \
-        up-registry.ft.com/coco/mongodb-backup:$DOCKER_APP_VERSION; "
-        
+        up-registry.ft.com/coco/mongodb-backup:$DOCKER_APP_VERSION; '
+      
 [Install]
 # this sets user-level
 WantedBy=multi-user.target
