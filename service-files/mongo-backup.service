@@ -1,10 +1,8 @@
 [Unit]
 Description=Job to backup mongo DB data files to S3
-# mongo DB should already be running
-Requires=mongodb@%i.service
 
 [Service]
-# process will be short-lived and that systemd should wait for the process to 
+# process will be short-lived and that systemd should wait for the process to
 # exit before continuing on with other units.
 Type=oneshot
 
@@ -20,10 +18,8 @@ ExecStartPre=-/usr/bin/docker kill %p
 # remove existing instance
 ExecStartPre=-/usr/bin/docker rm %p
 
-ExecStart=/bin/sh -c '\
-    # parse mongo port 
-    MONGODB_PORT=${docker ps | grep mongodb | awk '{ print $1 }' | xargs -i docker port '{}' 27017 | cut -d":" -f2}; \
-    # mongo hostname is the machine we are on now
+ExecStart=/bin/sh -c "\
+    MONGODB_PORT=$(docker ps | grep mongodb | awk '{ print $1 }' | xargs -i docker port '{}' 27017 | cut -d':' -f2); \
     MONGODB_HOST=$HOSTNAME; \
     AWS_ACCESS_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_access_key_id);\
     AWS_SECRET_KEY=$(/usr/bin/etcdctl get /ft/_credentials/aws/aws_secret_access_key); \
@@ -38,13 +34,14 @@ ExecStart=/bin/sh -c '\
         -e BUCKET_NAME=$BUCKET_NAME \
         -e DATA_FOLDER=$DATA_FOLDER \
         -e S3_DOMAIN=$S3_DOMAIN \
-        -v /vol/mongodb:$DATA_FOLDER \
-        up-registry.ft.com/coco/mongodb-backup:$DOCKER_APP_VERSION; '
-      
+        -v /vol/backup-test:$DATA_FOLDER \
+        up-registry.ft.com/coco/mongodb-backup:$DOCKER_APP_VERSION; "
+
 [Install]
 # this sets user-level
 WantedBy=multi-user.target
 
 [X-Fleet]
 # we only want this to run on mongo machines
-MachineOf=mongodb@%i.service
+# MachineMetadata=host_type=persistent
+MachineOf=mongodb@1.service
