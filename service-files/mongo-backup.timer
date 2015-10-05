@@ -1,0 +1,13 @@
+[Unit]
+Description=Runs the mongo backup job
+
+[Timer]
+#OnCalendar=daily # runs at midnight
+#OnCalendar=03:00  #runs at 3AM
+OnUnitActiveSec=5m # runs every 5 minutes
+
+[Install]
+WantedBy=timers.target
+
+[X-Fleet]
+MachineMetadata=host_type=persistent
