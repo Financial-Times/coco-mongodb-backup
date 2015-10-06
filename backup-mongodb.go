@@ -4,8 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"flag"
-	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,22 +30,22 @@ func readArgs() (string, int, string, string, string, string, string) {
 }
 
 func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
-	fmt.Println("mongoDbHost  : ", mongoDbHost)
-	fmt.Println("mongoDbPort  : ", mongoDbPort)
-	fmt.Println("bucketName   : ", bucketName)
-	fmt.Println("dataFolder   : ", dataFolder)
-	fmt.Println("s3Domain     : ", s3Domain)
+	info.Println("Using arguments:")
+	info.Println("mongoDbHost  : ", mongoDbHost)
+	info.Println("mongoDbPort  : ", mongoDbPort)
+	info.Println("bucketName   : ", bucketName)
+	info.Println("dataFolder   : ", dataFolder)
+	info.Println("s3Domain     : ", s3Domain)
 }
 
 func abortOnInvalidParams(paramNames []string) {
 	for _, paramName := range paramNames {
-		fmt.Println(paramName + " is missing or invalid!")
+		warn.Println(paramName + " is missing or invalid!")
 	}
-	fmt.Println("Aborting backup operation!")
-	os.Exit(1)
+	log.Panic("Aborting backup operation!")
 }
 
-func validateArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
+func checkIfArgsAreEmpty(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
 	var invalidArgs []string
 
 	if len(mongoDbHost) < 1 {
@@ -82,81 +82,87 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 
 	file, err := os.Open(path)
 	if err != nil {
-		fmt.Println("Cannot open file to add to archive: " + path + ", error: " + err.Error())
-		return err
+		log.Panic("Cannot open file to add to archive: "+path+", error: "+err.Error(), err)
 	}
 	defer file.Close()
 
 	//create and write tar-specific file header
 	fileInfoHeader, err := tar.FileInfoHeader(fileInfo, "")
 	if err != nil {
-		fmt.Println("Cannot create tar header, error: " + err.Error())
-		return err
+		log.Panic("Cannot create tar header, error: "+err.Error(), err)
 	}
 	//replace file name with full path to preserve file structure in the archive
 	fileInfoHeader.Name = path
 	err = tarWriter.WriteHeader(fileInfoHeader)
 	if err != nil {
-		fmt.Println("Cannot write tar header, error: " + err.Error())
-		return err
+		log.Panic("Cannot write tar header, error: "+err.Error(), err)
 	}
 
 	//add file to the archive
 	_, err = io.Copy(tarWriter, file)
 	if err != nil {
-		fmt.Println("Cannot add file to archive, error: " + err.Error())
-		return err
+		log.Panic("Cannot add file to archive, error: "+err.Error(), err)
 	}
 
-	fmt.Println("Added file " + path + " to archive.")
+	info.Println("Added file " + path + " to archive.")
 	return nil
 }
 
-func lockDb(session *mgo.Session) error {
-	fmt.Println("Attempting to lock DB...")
+func lockDb(session *mgo.Session) {
+	info.Println("Attempting to LOCK DB...")
 	err := session.FsyncLock()
 	if err != nil {
-		return err
+		log.Panic("Cannot LOCK DB: "+err.Error(), err)
 	}
-	fmt.Println("DB lock command successfully executed.")
-	return nil
+	info.Println("DB LOCK command successfully executed.")
 }
 
 func unlockDb(session *mgo.Session) {
-	fmt.Println("Attempting to unlock DB...")
+	info.Println("Attempting to UNLOCK DB...")
 	err := session.FsyncUnlock()
 	if err != nil {
-		fmt.Println("Cannot unlock DB, operation fails with error: " + err.Error())
-		return
+		log.Panic("Cannot LOCK DB: "+err.Error(), err)
 	}
-	fmt.Println("DB unlock command successfully executed.")
+	info.Println("DB UNLOCK command successfully executed.")
 }
 
-func printAbortMessage(operationDescription string, errorMessage string) {
-	fmt.Println(operationDescription + ", error: " + errorMessage)
-	fmt.Println("Aborting backup operation!")
+func initLogs(infoHandle io.Writer, warnHandle io.Writer, panicHandle io.Writer) {
+	//to be used for INFO-level logging: info.Println("foor is now bar")
+	info = log.New(infoHandle, "INFO  - ", logPattern)
+	//to be used for WARN-level logging: info.Println("foor is now bar")
+	warn = log.New(warnHandle, "WARN  - ", logPattern)
+
+	//to be used for panics: log.Panic("foo is on fire")
+	//log.Panic() = log.Printf + panic()
+	log.SetFlags(logPattern)
+	log.SetPrefix("ERROR - ")
+	log.SetOutput(panicHandle)
 }
 
 var tarWriter *tar.Writer
 var defaultDb = "native-store"
 var archiveNameDateFormat = "2006-01-02T15-04-05"
+var info *log.Logger
+var warn *log.Logger
 
 //this enables mgo to connect to secondary nodes
 var mongoDirectConnectionConfig = "/?connect=direct"
 
+const logPattern = log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile | log.LUTC
+
 func main() {
+	initLogs(os.Stdout, os.Stdout, os.Stderr)
 	startTime := time.Now()
-	fmt.Println("Starting backup operation: " + startTime.String())
+	info.Println("Starting backup operation.")
 
 	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain := readArgs()
 	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
-	validateArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
+	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 
 	mongoConnectionString := mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig
 	session, err := mgo.Dial(mongoConnectionString)
 	if err != nil {
-		printAbortMessage("Can't connect to mongo on "+mongoConnectionString, err.Error())
-		return
+		log.Panic("Can't connect to mongo on "+mongoConnectionString, err.Error(), err)
 	}
 	session.SetMode(mgo.Monotonic, true)
 	defer session.Close()
@@ -166,23 +172,16 @@ func main() {
 	result := make(map[string]interface{})
 	err = db.Run(bson.M{"isMaster": 1}, result)
 	if err != nil {
-		printAbortMessage("Can't check if node is master, db.isMaster() fails", err.Error())
-		return
+		log.Panic("Can't check if node is master, db.isMaster() fails", err.Error(), err)
 	}
 
 	isMaster := result["ismaster"].(bool)
 	if isMaster {
-		printAbortMessage("Backup will NOT be performed", "the node I am running on is PRIMARY")
-		return
+		log.Panic("Backup will NOT be performed", "the node I am running on is PRIMARY", err)
 	}
-	fmt.Println("The node I am running on is SECONDARY, backup will be performed.")
+	info.Println("The node I am running on is SECONDARY, backup will be performed.")
 
-	err = lockDb(session)
-	if err != nil {
-		printAbortMessage("Cannot lock DB", err.Error())
-		return
-	}
-
+	lockDb(session)
 	defer unlockDb(session)
 
 	//the default domain is s3.amazonaws.com, we need the eu-west domain
@@ -210,18 +209,15 @@ func main() {
 		defer gzipWriter.Close()
 		defer tarWriter.Close()
 
-		err = filepath.Walk(dataFolder, addtoArchive)
-		if err != nil {
-
-		}
+		filepath.Walk(dataFolder, addtoArchive)
 	}()
 
-	archiveName := time.Now().Format(archiveNameDateFormat)
+	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
 
 	//create a writer for the bucket
 	bucketWriter, err := bucket.PutWriter(archiveName, nil, nil)
 	if err != nil {
-		printAbortMessage("PutWriter cannot be created", err.Error())
+		log.Panic("PutWriter cannot be created: "+err.Error(), err)
 		return
 	}
 	defer bucketWriter.Close()
@@ -229,10 +225,11 @@ func main() {
 	//upload the archive to the bucket
 	_, err = io.Copy(bucketWriter, pipeReader)
 	if err != nil {
-		printAbortMessage("Cannot upload archive to S3", err.Error())
+		log.Panic("Cannot upload archive to S3: "+err.Error(), err)
 		return
 	}
 	pipeReader.Close()
 
-	fmt.Println("Duration: " + time.Since(startTime).String())
+	info.Print("Uploaded archive " + archiveName + " to " + bucketName + " S3 bucket.")
+	info.Println("Duration: " + time.Since(startTime).String())
 }
