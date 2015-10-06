@@ -230,6 +230,6 @@ func main() {
 	}
 	pipeReader.Close()
 
-	info.Print("Uploaded archive " + archiveName + " to " + bucketName + " S3 bucket.")
+	info.Println("Uploaded archive " + archiveName + " to " + bucketName + " S3 bucket.")
 	info.Println("Duration: " + time.Since(startTime).String())
 }
