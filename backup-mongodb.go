@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/rlmcpherson/s3gof3r"
 )
 
 func readArgs() (string, int, string, string, string, string, string) {
@@ -130,30 +128,9 @@ const defaultDb = "native-store"
 const connectionOptionSeparator = "&"
 const archiveNameDateFormat = "2006-01-02T15-04-05"
 
-type S3WriterProvider struct {
-	bucket *s3gof3r.Bucket
-}
-
-func newS3WriterProvider(awsAccessKey string, awsSecretKey string, s3Domain string, bucketName string) *S3WriterProvider {
-	s3gof3r.DefaultDomain = s3Domain
-
-	awsKeys := s3gof3r.Keys{
-		AccessKey: awsAccessKey,
-		SecretKey: awsSecretKey,
-	}
-
-	s3 := s3gof3r.New("", awsKeys)
-	bucket := s3.Bucket(bucketName)
-
-	return &S3WriterProvider{bucket}
-}
-
-func (writerProvider *S3WriterProvider) getWriter(fileName string) (io.WriteCloser, error) {
-	return writerProvider.bucket.PutWriter(fileName, nil, nil)
-}
-
 func main() {
 	initLogs(os.Stdout, os.Stdout, os.Stderr)
+
 	startTime := time.Now()
 	info.Println("Starting backup operation.")
 
@@ -162,7 +139,6 @@ func main() {
 	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 
 	dbService := newMongoService(mongoDbHost, mongoDbPort, []string{mongoDirectConnectionOption}, defaultDb)
-
 	dbService.openSession()
 	defer dbService.closeSession()
 
@@ -175,7 +151,6 @@ func main() {
 	defer dbService.unlockDb()
 
 	pipeReader, pipeWriter := io.Pipe()
-
 	//compress the tar archive
 	gzipWriter := gzip.NewWriter(pipeWriter)
 	//create a tar archive
@@ -193,8 +168,8 @@ func main() {
 	}()
 
 	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
-
 	bucketWriterProvider := newS3WriterProvider(awsAccessKey, awsSecretKey, s3Domain, bucketName)
+
 	bucketWriter, err := bucketWriterProvider.getWriter(archiveName)
 	if err != nil {
 		log.Panic("BucketWriter cannot be created: "+err.Error(), err)
