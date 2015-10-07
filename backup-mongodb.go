@@ -9,12 +9,60 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rlmcpherson/s3gof3r"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
+
+type mongoService struct {
+	connectionString, database string
+	session                    *mgo.Session
+}
+
+func buildMongoConnectionString(host string, port int, connectionOptions []string) string {
+	mongoConnectionString := host + ":" + strconv.Itoa(port)
+	if len(connectionOptions) == 0 {
+		return mongoConnectionString
+	}
+
+	mongoConnectionString += "/?"
+	for _, param := range connectionOptions {
+		mongoConnectionString += param + connectionOptionSeparator
+	}
+	mongoConnectionString = strings.TrimSuffix(mongoConnectionString, connectionOptionSeparator)
+
+	return mongoConnectionString
+}
+
+func newMongoService(host string, port int, connectionOptions []string, database string) *mongoService {
+	return &mongoService{buildMongoConnectionString(host, port, connectionOptions), database, nil}
+}
+
+func (service *mongoService) openSession() {
+	session, err := mgo.Dial(service.connectionString)
+	if err != nil {
+		log.Panic("Can't connect to mongo on "+service.connectionString, err.Error(), err)
+	}
+	session.SetMode(mgo.Monotonic, true)
+	service.session = session
+}
+
+func (service *mongoService) closeSession() {
+	service.session.Close()
+}
+
+func (service *mongoService) isCurrentNodeMaster() bool {
+	db := service.session.DB(defaultDb)
+	result := make(map[string]interface{})
+	err := db.Run(bson.M{"isMaster": 1}, result)
+	if err != nil {
+		log.Panic("Can't check if node is master, db.isMaster() fails", err.Error(), err)
+	}
+	return result["ismaster"].(bool)
+}
 
 func readArgs() (string, int, string, string, string, string, string) {
 	mongoDbHost := flag.String("mongoDbHost", "", "Mongo DB Host")
@@ -42,7 +90,7 @@ func abortOnInvalidParams(paramNames []string) {
 	for _, paramName := range paramNames {
 		warn.Println(paramName + " is missing or invalid!")
 	}
-	log.Panic("Aborting backup operation!")
+	log.Panic("Aborting backulp operation!")
 }
 
 func checkIfArgsAreEmpty(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
@@ -108,18 +156,18 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 	return nil
 }
 
-func lockDb(session *mgo.Session) {
+func (service *mongoService) lockDb() {
 	info.Println("Attempting to LOCK DB...")
-	err := session.FsyncLock()
+	err := service.session.FsyncLock()
 	if err != nil {
 		log.Panic("Cannot LOCK DB: "+err.Error(), err)
 	}
 	info.Println("DB LOCK command successfully executed.")
 }
 
-func unlockDb(session *mgo.Session) {
+func (service *mongoService) unlockDb() {
 	info.Println("Attempting to UNLOCK DB...")
-	err := session.FsyncUnlock()
+	err := service.session.FsyncUnlock()
 	if err != nil {
 		log.Panic("Cannot LOCK DB: "+err.Error(), err)
 	}
@@ -140,15 +188,16 @@ func initLogs(infoHandle io.Writer, warnHandle io.Writer, panicHandle io.Writer)
 }
 
 var tarWriter *tar.Writer
-var defaultDb = "native-store"
 var archiveNameDateFormat = "2006-01-02T15-04-05"
 var info *log.Logger
 var warn *log.Logger
 
 //this enables mgo to connect to secondary nodes
-var mongoDirectConnectionConfig = "/?connect=direct"
+const mongoDirectConnectionOption = "connect=direct"
 
 const logPattern = log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile | log.LUTC
+const defaultDb = "native-store"
+const connectionOptionSeparator = "&"
 
 func main() {
 	initLogs(os.Stdout, os.Stdout, os.Stderr)
@@ -159,30 +208,18 @@ func main() {
 	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
 
-	mongoConnectionString := mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig
-	session, err := mgo.Dial(mongoConnectionString)
-	if err != nil {
-		log.Panic("Can't connect to mongo on "+mongoConnectionString, err.Error(), err)
-	}
-	session.SetMode(mgo.Monotonic, true)
-	defer session.Close()
+	dbService := newMongoService(mongoDbHost, mongoDbPort, []string{mongoDirectConnectionOption}, defaultDb)
 
-	db := session.DB(defaultDb)
+	dbService.openSession()
+	defer dbService.closeSession()
 
-	result := make(map[string]interface{})
-	err = db.Run(bson.M{"isMaster": 1}, result)
-	if err != nil {
-		log.Panic("Can't check if node is master, db.isMaster() fails", err.Error(), err)
-	}
-
-	isMaster := result["ismaster"].(bool)
-	if isMaster {
-		log.Panic("Backup will NOT be performed", "the node I am running on is PRIMARY", err)
+	if dbService.isCurrentNodeMaster() {
+		log.Panic("Backup will NOT be performed", "the node I am running on is PRIMARY")
 	}
 	info.Println("The node I am running on is SECONDARY, backup will be performed.")
 
-	lockDb(session)
-	defer unlockDb(session)
+	dbService.lockDb()
+	defer dbService.unlockDb()
 
 	//the default domain is s3.amazonaws.com, we need the eu-west domain
 	s3gof3r.DefaultDomain = s3Domain
