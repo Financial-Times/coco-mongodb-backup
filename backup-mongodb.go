@@ -119,7 +119,6 @@ func initLogs(infoHandle io.Writer, warnHandle io.Writer, panicHandle io.Writer)
 }
 
 var tarWriter *tar.Writer
-var archiveNameDateFormat = "2006-01-02T15-04-05"
 var info *log.Logger
 var warn *log.Logger
 
@@ -129,6 +128,29 @@ const mongoDirectConnectionOption = "connect=direct"
 const logPattern = log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile | log.LUTC
 const defaultDb = "native-store"
 const connectionOptionSeparator = "&"
+const archiveNameDateFormat = "2006-01-02T15-04-05"
+
+type S3WriterProvider struct {
+	bucket *s3gof3r.Bucket
+}
+
+func newS3WriterProvider(awsAccessKey string, awsSecretKey string, s3Domain string, bucketName string) *S3WriterProvider {
+	s3gof3r.DefaultDomain = s3Domain
+
+	awsKeys := s3gof3r.Keys{
+		AccessKey: awsAccessKey,
+		SecretKey: awsSecretKey,
+	}
+
+	s3 := s3gof3r.New("", awsKeys)
+	bucket := s3.Bucket(bucketName)
+
+	return &S3WriterProvider{bucket}
+}
+
+func (writerProvider *S3WriterProvider) getWriter(fileName string) (io.WriteCloser, error) {
+	return writerProvider.bucket.PutWriter(fileName, nil, nil)
+}
 
 func main() {
 	initLogs(os.Stdout, os.Stdout, os.Stderr)
@@ -152,16 +174,6 @@ func main() {
 	dbService.lockDb()
 	defer dbService.unlockDb()
 
-	//the default domain is s3.amazonaws.com, we need the eu-west domain
-	s3gof3r.DefaultDomain = s3Domain
-
-	awsKeys := s3gof3r.Keys{
-		AccessKey: awsAccessKey,
-		SecretKey: awsSecretKey,
-	}
-
-	s3 := s3gof3r.New("", awsKeys)
-	bucket := s3.Bucket(bucketName)
 	pipeReader, pipeWriter := io.Pipe()
 
 	//compress the tar archive
@@ -182,10 +194,10 @@ func main() {
 
 	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
 
-	//create a writer for the bucket
-	bucketWriter, err := bucket.PutWriter(archiveName, nil, nil)
+	bucketWriterProvider := newS3WriterProvider(awsAccessKey, awsSecretKey, s3Domain, bucketName)
+	bucketWriter, err := bucketWriterProvider.getWriter(archiveName)
 	if err != nil {
-		log.Panic("PutWriter cannot be created: "+err.Error(), err)
+		log.Panic("BucketWriter cannot be created: "+err.Error(), err)
 		return
 	}
 	defer bucketWriter.Close()
