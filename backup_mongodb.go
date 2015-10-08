@@ -8,13 +8,82 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
-
-	"github.com/rlmcpherson/s3gof3r"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
 )
+
+var tarWriter *tar.Writer
+var info *log.Logger
+var warn *log.Logger
+
+//this enables mgo to connect to secondary nodes
+const mongoDirectConnectionOption = "connect=direct"
+const logPattern = log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile | log.LUTC
+const defaultDb = "native-store"
+const connectionOptionSeparator = "&"
+const archiveNameDateFormat = "2006-01-02T15-04-05"
+
+func main() {
+	initLogs(os.Stdout, os.Stdout, os.Stderr)
+
+	startTime := time.Now()
+	info.Println("Starting backup operation.")
+
+	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain := readArgs()
+	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
+	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
+
+	dbService := newMongoService(mongoDbHost, mongoDbPort, []string{mongoDirectConnectionOption}, defaultDb)
+	dbService.openSession()
+	defer dbService.closeSession()
+
+	if dbService.isCurrentNodeMaster() {
+		log.Panic("Backup will NOT be performed", "the node I am running on is PRIMARY")
+	}
+	info.Println("The node I am running on is SECONDARY, backup will be performed.")
+
+	dbService.lockDb()
+	defer dbService.unlockDb()
+
+	pipeReader, pipeWriter := io.Pipe()
+	//compress the tar archive
+	gzipWriter := gzip.NewWriter(pipeWriter)
+	//create a tar archive
+	tarWriter = tar.NewWriter(gzipWriter)
+
+	//a goroutine is needed because the pipe is synchronous:
+	//the writer will block until the reader is reading and vice-versa
+	go func() {
+		//we have to close these here so that the read function doesn't block
+		defer pipeWriter.Close()
+		defer gzipWriter.Close()
+		defer tarWriter.Close()
+
+		//recursively walk the filetree of the data folder,
+		//writing all files and folder structure to the archive
+		filepath.Walk(dataFolder, addtoArchive)
+	}()
+
+	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
+	bucketWriterProvider := newS3WriterProvider(awsAccessKey, awsSecretKey, s3Domain, bucketName)
+
+	bucketWriter, err := bucketWriterProvider.getWriter(archiveName)
+	if err != nil {
+		log.Panic("BucketWriter cannot be created: "+err.Error(), err)
+		return
+	}
+	defer bucketWriter.Close()
+
+	//upload the archive to the bucket
+	_, err = io.Copy(bucketWriter, pipeReader)
+	if err != nil {
+		log.Panic("Cannot upload archive to S3: "+err.Error(), err)
+		return
+	}
+	pipeReader.Close()
+
+	info.Println("Uploaded archive " + archiveName + " to " + bucketName + " S3 bucket.")
+	info.Println("Duration: " + time.Since(startTime).String())
+}
 
 func readArgs() (string, int, string, string, string, string, string) {
 	mongoDbHost := flag.String("mongoDbHost", "", "Mongo DB Host")
@@ -108,24 +177,6 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 	return nil
 }
 
-func lockDb(session *mgo.Session) {
-	info.Println("Attempting to LOCK DB...")
-	err := session.FsyncLock()
-	if err != nil {
-		log.Panic("Cannot LOCK DB: "+err.Error(), err)
-	}
-	info.Println("DB LOCK command successfully executed.")
-}
-
-func unlockDb(session *mgo.Session) {
-	info.Println("Attempting to UNLOCK DB...")
-	err := session.FsyncUnlock()
-	if err != nil {
-		log.Panic("Cannot LOCK DB: "+err.Error(), err)
-	}
-	info.Println("DB UNLOCK command successfully executed.")
-}
-
 func initLogs(infoHandle io.Writer, warnHandle io.Writer, panicHandle io.Writer) {
 	//to be used for INFO-level logging: info.Println("foor is now bar")
 	info = log.New(infoHandle, "INFO  - ", logPattern)
@@ -137,99 +188,4 @@ func initLogs(infoHandle io.Writer, warnHandle io.Writer, panicHandle io.Writer)
 	log.SetFlags(logPattern)
 	log.SetPrefix("ERROR - ")
 	log.SetOutput(panicHandle)
-}
-
-var tarWriter *tar.Writer
-var defaultDb = "native-store"
-var archiveNameDateFormat = "2006-01-02T15-04-05"
-var info *log.Logger
-var warn *log.Logger
-
-//this enables mgo to connect to secondary nodes
-var mongoDirectConnectionConfig = "/?connect=direct"
-
-const logPattern = log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile | log.LUTC
-
-func main() {
-	initLogs(os.Stdout, os.Stdout, os.Stderr)
-	startTime := time.Now()
-	info.Println("Starting backup operation.")
-
-	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain := readArgs()
-	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
-	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
-
-	mongoConnectionString := mongoDbHost + ":" + strconv.Itoa(mongoDbPort) + mongoDirectConnectionConfig
-	session, err := mgo.Dial(mongoConnectionString)
-	if err != nil {
-		log.Panic("Can't connect to mongo on "+mongoConnectionString, err.Error(), err)
-	}
-	session.SetMode(mgo.Monotonic, true)
-	defer session.Close()
-
-	db := session.DB(defaultDb)
-
-	result := make(map[string]interface{})
-	err = db.Run(bson.M{"isMaster": 1}, result)
-	if err != nil {
-		log.Panic("Can't check if node is master, db.isMaster() fails", err.Error(), err)
-	}
-
-	isMaster := result["ismaster"].(bool)
-	if isMaster {
-		log.Panic("Backup will NOT be performed", "the node I am running on is PRIMARY", err)
-	}
-	info.Println("The node I am running on is SECONDARY, backup will be performed.")
-
-	lockDb(session)
-	defer unlockDb(session)
-
-	//the default domain is s3.amazonaws.com, we need the eu-west domain
-	s3gof3r.DefaultDomain = s3Domain
-
-	awsKeys := s3gof3r.Keys{
-		AccessKey: awsAccessKey,
-		SecretKey: awsSecretKey,
-	}
-
-	s3 := s3gof3r.New("", awsKeys)
-	bucket := s3.Bucket(bucketName)
-	pipeReader, pipeWriter := io.Pipe()
-
-	//compress the tar archive
-	gzipWriter := gzip.NewWriter(pipeWriter)
-	//create a tar archive
-	tarWriter = tar.NewWriter(gzipWriter)
-
-	//recursively walk the filetree of the data folder,
-	//adding all files and folder structure to the archive
-	go func() {
-		//we have to close these here so that the read function doesn't block
-		defer pipeWriter.Close()
-		defer gzipWriter.Close()
-		defer tarWriter.Close()
-
-		filepath.Walk(dataFolder, addtoArchive)
-	}()
-
-	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
-
-	//create a writer for the bucket
-	bucketWriter, err := bucket.PutWriter(archiveName, nil, nil)
-	if err != nil {
-		log.Panic("PutWriter cannot be created: "+err.Error(), err)
-		return
-	}
-	defer bucketWriter.Close()
-
-	//upload the archive to the bucket
-	_, err = io.Copy(bucketWriter, pipeReader)
-	if err != nil {
-		log.Panic("Cannot upload archive to S3: "+err.Error(), err)
-		return
-	}
-	pipeReader.Close()
-
-	info.Println("Uploaded archive " + archiveName + " to " + bucketName + " S3 bucket.")
-	info.Println("Duration: " + time.Since(startTime).String())
 }
