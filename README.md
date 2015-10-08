@@ -1,6 +1,6 @@
 # Mongo DB backup application
 
-**Locks the DB it's run on, archives and compresses the given data folder and uploads it to an AWS S3 bucket, and unlocks the DB**
+**Locks the DB it's run on, archives and compresses the given data folder, uploads it to an AWS S3 bucket, and unlocks the DB.**
 
 ## Installation
 
@@ -65,3 +65,11 @@ docker run \
 -v /tmp/dir/:/data/db  \
 coco/coco-mongodb-backup
 ```
+
+## Implementation details
+### Gof3r
+Uses [gof3r](https://github.com/rlmcpherson/s3gof3r) to stream the archived folder to S3.
+### Go Pipe
+Uses a [pipe](https://golang.org/pkg/io/#Pipe) to transfer the output of the archiver straight to S3 - this means that the archived folder itself isn't stored on the disk.
+
+The pipe is synchonous, meaning that the reader cannot read from the pipe until the corresponding writer is writing something, and vice-versa.
