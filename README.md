@@ -8,7 +8,7 @@ For getting started with Go, refer to the [nativerw README](https://github.com/F
 
 `go install github.com/Financial-Times/coco-mongodb-backup`
 
-:warning: Needs GO 1.5 or higher
+:information_source: Needs GO 1.5 or higher
 
 ## Running the Go executable
 
@@ -71,5 +71,3 @@ coco/coco-mongodb-backup
 Uses [gof3r](https://github.com/rlmcpherson/s3gof3r) to stream the archived folder to S3.
 ### Go Pipe
 Uses a [pipe](https://golang.org/pkg/io/#Pipe) to transfer the output of the archiver straight to S3 - this means that the archived folder itself isn't stored on the disk.
-
-The pipe is synchonous, meaning that the reader cannot read from the pipe until the corresponding writer is writing something, and vice-versa.
