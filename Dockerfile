@@ -1,8 +1,10 @@
 FROM alpine
 
-ADD  backup-mongodb.go /
+ADD  *.go /
 RUN apk add --update bash \
-  && apk --update add go git\
+  && apk --update add git\
+  && echo "http://dl-4.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories \
+  && apk --update add go\
   && ORG_PATH="github.com/Financial-Times" \
   && REPO_PATH="${ORG_PATH}/coco-mongodb-backup" \
   && export GOPATH=/gopath \
