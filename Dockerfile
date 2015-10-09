@@ -24,4 +24,5 @@ CMD ./coco-mongodb-backup \
     -awsSecretKey=$AWS_SECRET_KEY \
     -bucketName=$BUCKET_NAME \
     -dataFolder=$DATA_FOLDER \
-    -s3Domain=$S3_DOMAIN
+    -s3Domain=$S3_DOMAIN \
+    -env=$ENV_TAG

@@ -28,9 +28,9 @@ func main() {
 	startTime := time.Now()
 	info.Println("Starting backup operation.")
 
-	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain := readArgs()
-	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
-	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain)
+	mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain, env := readArgs()
+	printArgs(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain, env)
+	checkIfArgsAreEmpty(mongoDbHost, mongoDbPort, awsAccessKey, awsSecretKey, bucketName, dataFolder, s3Domain, env)
 
 	dbService := newMongoService(mongoDbHost, mongoDbPort, []string{mongoDirectConnectionOption}, defaultDb)
 	dbService.openSession()
@@ -64,6 +64,7 @@ func main() {
 	}()
 
 	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
+	archiveName += "_" + env
 	bucketWriterProvider := newS3WriterProvider(awsAccessKey, awsSecretKey, s3Domain, bucketName)
 
 	bucketWriter, err := bucketWriterProvider.getWriter(archiveName)
@@ -85,7 +86,7 @@ func main() {
 	info.Println("Duration: " + time.Since(startTime).String())
 }
 
-func readArgs() (string, int, string, string, string, string, string) {
+func readArgs() (string, int, string, string, string, string, string, string) {
 	mongoDbHost := flag.String("mongoDbHost", "", "Mongo DB Host")
 	mongoDbPort := flag.Int("mongoDbPort", -1, "Mongo DB Port")
 	awsAccessKey := flag.String("awsAccessKey", "", "AWS access key")
@@ -93,18 +94,19 @@ func readArgs() (string, int, string, string, string, string, string) {
 	bucketName := flag.String("bucketName", "", "Bucket name")
 	dataFolder := flag.String("dataFolder", "", "Data folder to back up")
 	s3Domain := flag.String("s3Domain", "", "The S3 domain")
-
+	env := flag.String("env", "", "The environment")
 	flag.Parse()
-	return *mongoDbHost, *mongoDbPort, *awsAccessKey, *awsSecretKey, *bucketName, *dataFolder, *s3Domain
+	return *mongoDbHost, *mongoDbPort, *awsAccessKey, *awsSecretKey, *bucketName, *dataFolder, *s3Domain, *env
 }
 
-func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
+func printArgs(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string, env string) {
 	info.Println("Using arguments:")
 	info.Println("mongoDbHost  : ", mongoDbHost)
 	info.Println("mongoDbPort  : ", mongoDbPort)
 	info.Println("bucketName   : ", bucketName)
 	info.Println("dataFolder   : ", dataFolder)
 	info.Println("s3Domain     : ", s3Domain)
+	info.Println("env          : ", env)
 }
 
 func abortOnInvalidParams(paramNames []string) {
@@ -114,7 +116,7 @@ func abortOnInvalidParams(paramNames []string) {
 	log.Panic("Aborting backup operation!")
 }
 
-func checkIfArgsAreEmpty(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string) {
+func checkIfArgsAreEmpty(mongoDbHost string, mongoDbPort int, awsAccessKey string, awsSecretKey string, bucketName string, dataFolder string, s3Domain string, env string) {
 	var invalidArgs []string
 
 	if len(mongoDbHost) < 1 {
@@ -137,6 +139,9 @@ func checkIfArgsAreEmpty(mongoDbHost string, mongoDbPort int, awsAccessKey strin
 	}
 	if len(s3Domain) < 1 {
 		invalidArgs = append(invalidArgs, "s3Domain")
+	}
+	if len(env) < 1 {
+		invalidArgs = append(invalidArgs, "env")
 	}
 
 	if len(invalidArgs) > 0 {

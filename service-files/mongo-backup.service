@@ -28,6 +28,7 @@ ExecStart=/bin/sh -c "\
     BUCKET_NAME=$(/usr/bin/etcdctl get /ft/config/mongo-backup/bucket); \
     DATA_FOLDER=$(/usr/bin/etcdctl get /ft/config/mongo-backup/data_folder); \
     S3_DOMAIN=$(/usr/bin/etcdctl get /ft/config/mongo-backup/s3_domain); \
+    ENV_TAG=$(usr/bin/etcdctl get /ft/config/environment_tag); \
      /usr/bin/docker run --rm --name %p \
         -e MONGODB_PORT=$MONGODB_PORT \
         -e MONGODB_HOST=$MONGODB_HOST \
@@ -36,6 +37,7 @@ ExecStart=/bin/sh -c "\
         -e BUCKET_NAME=$BUCKET_NAME \
         -e DATA_FOLDER=$DATA_FOLDER \
         -e S3_DOMAIN=$S3_DOMAIN \
+        -e ENV_TAG=$ENV_TAG \
         -v /vol/backup-test:$DATA_FOLDER \
         up-registry.ft.com/coco/mongodb-backup:$DOCKER_APP_VERSION; "
 
