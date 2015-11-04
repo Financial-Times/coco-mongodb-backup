@@ -37,7 +37,8 @@ func main() {
 	defer dbService.closeSession()
 
 	if dbService.isCurrentNodeMaster() {
-		log.Panic("Backup will NOT be performed", "the node I am running on is PRIMARY")
+		warn.Println("Backup will NOT be performed, the node I am running on is PRIMARY")
+		return
 	}
 	info.Println("The node I am running on is SECONDARY, backup will be performed.")
 
