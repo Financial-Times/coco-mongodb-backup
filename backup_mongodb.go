@@ -36,11 +36,11 @@ func main() {
 	dbService.openSession()
 	defer dbService.closeSession()
 
-	if dbService.isCurrentNodeMaster() {
-		warn.Println("Backup will NOT be performed, the node I am running on is PRIMARY")
+	if !dbService.isNodeForBackup() {
+		warn.Println("Backup will NOT be performed.")
 		return
 	}
-	info.Println("The node I am running on is SECONDARY, backup will be performed.")
+	info.Println("The node I am running on is the eligible SECONDARY, backup will be performed.")
 
 	dbService.lockDb()
 	defer dbService.unlockDb()
