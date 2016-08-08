@@ -15,6 +15,12 @@ type MongoService struct {
 	session                    *mgo.Session
 }
 
+type mongoClusterHostInfo struct {
+	node        string
+	primary     string
+	secondaries []string
+}
+
 func buildMongoConnectionString(host string, port int, connectionOptions []string) string {
 	mongoConnectionString := host + ":" + strconv.Itoa(port)
 	if len(connectionOptions) == 0 {
@@ -54,34 +60,17 @@ func (service *MongoService) isNodeForBackup() bool {
 	if err != nil {
 		log.Panic("Can't check if node is master, db.isMaster() fails", err.Error(), err)
 	}
+	backup, hostInfo := isNodeForBackup(result)
 
-	if result["me"] == nil || result["hosts"] == nil {
-		warn.Println("Node is not part of a cluster.")
-		return false
+	if !backup {
+		if hostInfo.node == hostInfo.primary {
+			info.Println("This node is master.")
+		} else {
+			info.Printf("This node (%s) is not the lowest secondary (%s).", hostInfo.node, hostInfo.secondaries[0])
+		}
 	}
 
-	master := result["ismaster"].(bool)
-	if master {
-		info.Println("This node is master.")
-		return false
-	}
-
-	thisNode := result["me"].(string)
-	primary := result["primary"].(string)
-	allNodes := result["hosts"].([]string)
-	sort.Strings(allNodes)
-	var lowestSecondary string
-	if allNodes[0] == primary {
-		lowestSecondary = allNodes[1]
-	} else {
-		lowestSecondary = allNodes[0]
-	}
-
-	if lowestSecondary != thisNode {
-		info.Printf("This node (%s) is not the lowest secondary (%s).", thisNode, lowestSecondary)
-	}
-
-	return lowestSecondary == thisNode
+	return backup
 }
 
 func (service *MongoService) lockDb() {
@@ -100,4 +89,34 @@ func (service *MongoService) unlockDb() {
 		log.Panic("Cannot LOCK DB: "+err.Error(), err)
 	}
 	info.Println("DB UNLOCK command successfully executed.")
+}
+
+func isNodeForBackup(mongoJson map[string]interface{}) (bool, mongoClusterHostInfo) {
+	if mongoJson["me"] == nil || mongoJson["hosts"] == nil {
+		warn.Println("Node is not part of a cluster.")
+		return false, mongoClusterHostInfo{}
+	}
+
+	master := mongoJson["ismaster"].(bool)
+
+	thisNode := mongoJson["me"].(string)
+	primary := mongoJson["primary"].(string)
+
+	allNodesUntyped := mongoJson["hosts"].([]interface{})
+	clusterSize := len(allNodesUntyped)
+	allNodes := make([]string, 0, clusterSize)
+	for _, v := range allNodesUntyped {
+		node := v.(string)
+		if node != primary {
+			allNodes = append(allNodes, node)
+		}
+	}
+	sort.Strings(allNodes)
+	lowestSecondary := ""
+	if len(allNodes) > 0 {
+		lowestSecondary = allNodes[0]
+	}
+
+	return (!master) && (lowestSecondary == thisNode),
+		mongoClusterHostInfo{thisNode, primary, allNodes}
 }
