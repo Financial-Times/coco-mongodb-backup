@@ -10,7 +10,7 @@ RUN apk add --update bash \
   && mkdir -p $GOPATH/src/${ORG_PATH} \
   && ln -s ${PWD} $GOPATH/src/${REPO_PATH} \
   && cd $GOPATH/src/${REPO_PATH} \
-  && go get -t ./... \
+  && go get -t \
   && go test \
   && go build ${REPO_PATH} \
   && apk del go git \
