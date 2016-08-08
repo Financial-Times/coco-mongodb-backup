@@ -112,7 +112,10 @@ func isNodeForBackup(mongoJson map[string]interface{}) (bool, mongoClusterHostIn
 		}
 	}
 	sort.Strings(allNodes)
-	lowestSecondary := allNodes[0]
+	lowestSecondary := ""
+	if len(allNodes) > 0 {
+		lowestSecondary = allNodes[0]
+	}
 
 	return (!master) && (lowestSecondary == thisNode),
 		mongoClusterHostInfo{thisNode, primary, allNodes}
