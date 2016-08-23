@@ -45,29 +45,9 @@ func main() {
 	dbService.lockDb()
 	defer dbService.unlockDb()
 
-	pipeReader, pipeWriter := io.Pipe()
-	//compress the tar archive
-	gzipWriter := gzip.NewWriter(pipeWriter)
-	//create a tar archive
-	tarWriter = tar.NewWriter(gzipWriter)
-
-	//a goroutine is needed because the pipe is synchronous:
-	//the writer will block until the reader is reading and vice-versa
-	go func() {
-		//we have to close these here so that the read function doesn't block
-		defer pipeWriter.Close()
-		defer gzipWriter.Close()
-		defer tarWriter.Close()
-
-		//recursively walk the filetree of the data folder,
-		//writing all files and folder structure to the archive
-		filepath.Walk(dataFolder, addtoArchive)
-	}()
-
 	archiveName := time.Now().UTC().Format(archiveNameDateFormat)
 	archiveName += "_" + env
 	bucketWriterProvider := newS3WriterProvider(awsAccessKey, awsSecretKey, s3Domain, bucketName)
-
 	bucketWriter, err := bucketWriterProvider.getWriter(archiveName)
 	if err != nil {
 		log.Panic("BucketWriter cannot be created: "+err.Error(), err)
@@ -75,13 +55,19 @@ func main() {
 	}
 	defer bucketWriter.Close()
 
-	//upload the archive to the bucket
-	_, err = io.Copy(bucketWriter, pipeReader)
+	//compress the tar archive
+	gzipWriter, err := gzip.NewWriterLevel(bucketWriter, gzip.BestSpeed)
 	if err != nil {
-		log.Panic("Cannot upload archive to S3: "+err.Error(), err)
-		return
+		log.Panicf("Failed to create gzip writer : %v\n", err.Error())
 	}
-	pipeReader.Close()
+	defer gzipWriter.Close()
+	//create a tar archive
+	tarWriter = tar.NewWriter(gzipWriter)
+	defer tarWriter.Close()
+
+	//recursively walk the filetree of the data folder,
+	//writing all files and folder structure to the archive
+	filepath.Walk(dataFolder, addtoArchive)
 
 	info.Println("Uploaded archive " + archiveName + " to " + bucketName + " S3 bucket.")
 	info.Println("Duration: " + time.Since(startTime).String())
