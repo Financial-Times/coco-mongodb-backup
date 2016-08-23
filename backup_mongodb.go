@@ -56,7 +56,10 @@ func main() {
 	defer bucketWriter.Close()
 
 	//compress the tar archive
-	gzipWriter := gzip.NewWriter(bucketWriter)
+	gzipWriter, err := gzip.NewWriterLevel(bucketWriter, gzip.BestSpeed)
+	if err != nil {
+		log.Panicf("Failed to create gzip writer : %v\n", err.Error())
+	}
 	defer gzipWriter.Close()
 	//create a tar archive
 	tarWriter = tar.NewWriter(gzipWriter)
