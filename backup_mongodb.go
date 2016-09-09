@@ -2,13 +2,14 @@ package main
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"flag"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
+
+	gzip "github.com/klauspost/pgzip"
 )
 
 var tarWriter *tar.Writer
