@@ -15,12 +15,4 @@ RUN apk update \
   && apk del go git \
   && rm -rf $GOPATH /var/cache/apk/*
 
-CMD exec ./coco-mongodb-backup \
-    -mongoDbPort=$MONGODB_PORT \
-    -mongoDbHost=$MONGODB_HOST \
-    -awsAccessKey=$AWS_ACCESS_KEY \
-    -awsSecretKey=$AWS_SECRET_KEY \
-    -bucketName=$BUCKET_NAME \
-    -dataFolder=$DATA_FOLDER \
-    -s3Domain=$S3_DOMAIN \
-    -env=$ENV_TAG
+CMD exec ./coco-mongodb-backup
