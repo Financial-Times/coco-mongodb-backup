@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 	"strconv"
+	"time"
 )
 
 var tarWriter *tar.Writer
@@ -58,7 +58,7 @@ func main() {
 	bucketWriterProvider := newS3WriterProvider(awsAccessKey, awsSecretKey, s3Domain, bucketName)
 	bucketWriter, err := bucketWriterProvider.getWriter(archiveName)
 	if err != nil {
-		log.Panic("BucketWriter cannot be created: " + err.Error(), err)
+		log.Panic("BucketWriter cannot be created: "+err.Error(), err)
 		return
 	}
 	defer bucketWriter.Close()
@@ -154,26 +154,26 @@ func addtoArchive(path string, fileInfo os.FileInfo, err error) error {
 
 	file, err := os.Open(path)
 	if err != nil {
-		log.Panic("Cannot open file to add to archive: " + path + ", error: " + err.Error(), err)
+		log.Panic("Cannot open file to add to archive: "+path+", error: "+err.Error(), err)
 	}
 	defer file.Close()
 
 	//create and write tar-specific file header
 	fileInfoHeader, err := tar.FileInfoHeader(fileInfo, "")
 	if err != nil {
-		log.Panic("Cannot create tar header, error: " + err.Error(), err)
+		log.Panic("Cannot create tar header, error: "+err.Error(), err)
 	}
 	//replace file name with full path to preserve file structure in the archive
 	fileInfoHeader.Name = path
 	err = tarWriter.WriteHeader(fileInfoHeader)
 	if err != nil {
-		log.Panic("Cannot write tar header, error: " + err.Error(), err)
+		log.Panic("Cannot write tar header, error: "+err.Error(), err)
 	}
 
 	//add file to the archive
 	_, err = io.Copy(tarWriter, file)
 	if err != nil {
-		log.Panic("Cannot add file to archive, error: " + err.Error(), err)
+		log.Panic("Cannot add file to archive, error: "+err.Error(), err)
 	}
 
 	info.Println("Added file " + path + " to archive.")
